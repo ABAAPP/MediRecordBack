@@ -1,0 +1,163 @@
+{
+  "realm": "medirecord",
+  "displayName": "Medirecord",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": false,
+  "accessTokenLifespan": 1800,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "roles": {
+    "realm": [
+      {
+        "name": "ADMIN",
+        "description": "Administrador: acceso total, incluye /api/v1/admin/**"
+      },
+      {
+        "name": "MEDICO",
+        "description": "Medico tratante: consulta y actualiza expedientes"
+      },
+      {
+        "name": "RECEPCION",
+        "description": "Recepcion: alta de pacientes y agenda"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "medirecord-api",
+      "name": "Medirecord API (confidencial, solo integraciones)",
+      "description": "Cliente de servicio. Habilita password grant SOLO para desarrollo.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "medirecord-secret",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true,
+      "redirectUris": [
+        "http://localhost:8080/*",
+        "http://localhost:3000/*",
+        "http://localhost:5173/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000",
+        "http://localhost:5173"
+      ],
+      "attributes": {
+        "post.logout.redirect.uris": "http://localhost:3000/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "realm roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "medirecord-web",
+      "name": "Medirecord Web (SPA, Authorization Code + PKCE)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:3000/*",
+        "http://localhost:5173/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000",
+        "http://localhost:5173"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:3000/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "realm roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "admin",
+      "email": "admin@medirecord.local",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Admin",
+      "lastName": "Medirecord",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [ "ADMIN", "MEDICO", "RECEPCION" ]
+    },
+    {
+      "username": "medico",
+      "email": "medico@medirecord.local",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Dra. Ana",
+      "lastName": "Gomez",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "medico123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [ "MEDICO" ]
+    },
+    {
+      "username": "recepcion",
+      "email": "recepcion@medirecord.local",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Luis",
+      "lastName": "Ramos",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "recepcion123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [ "RECEPCION" ]
+    }
+  ]
+}
