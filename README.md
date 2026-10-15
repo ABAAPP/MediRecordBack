@@ -80,7 +80,7 @@ src/main/resources/
 ├── application.properties            # Configuracion comun
 ├── application-dev.properties        # Perfil por defecto: verboso, SQL logueado
 ├── application-prod.properties       # Produccion: fail-fast, sin docs, root en WARN
-└── db/migration/                     # Migraciones Flyway (V1__crear_tabla_paciente.sql)
+└── db/migration/                     # Migraciones Flyway (V1 paciente, V2 usuario, V3 medicamento)
 
 src/test/java/com/api/medirecord/
 ├── support/                          # Bases reutilizables de tests (Testcontainers)
@@ -91,6 +91,13 @@ src/test/java/com/api/medirecord/
 ```
 
 `paciente/` es un módulo de referencia: cópialo como plantilla para los demás dominios.
+
+El módulo `usuario/` guarda al usuario final (la persona que necesita recordatorios de
+medicamentos) y su relación con Keycloak: la columna `keycloak_id` enlaza la cuenta con el claim
+`sub` del token, de modo que **nunca se almacenan contraseñas** (la autenticación es
+responsabilidad de Keycloak). Cada usuario tiene un `id` UUID único. El módulo `medicamento/`
+define la relación 1:N usuario → medicamento (clave foránea `usuario_id`), base de los
+recordatorios.
 
 ---
 
