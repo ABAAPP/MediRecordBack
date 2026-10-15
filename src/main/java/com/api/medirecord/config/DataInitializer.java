@@ -1,55 +1,42 @@
 package com.api.medirecord.config;
 
-import com.api.medirecord.model.Usuario;
-import com.api.medirecord.repository.UsuarioRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
 
-import java.time.LocalDateTime;
+import com.api.medirecord.usuario.Usuario;
+import com.api.medirecord.usuario.UsuarioRepository;
 
-@Configuration
+/**
+ * Datos de ejemplo para desarrollo local.
+ *
+ * <p>Solo se activa con el perfil {@code dev}; en produccion y en tests los
+ * usuarios se crean por el flujo real (registro o primer inicio de sesion en
+ * Keycloak). Nunca se siembran datos de prueba en migraciones versionadas.</p>
+ */
+@Configuration(proxyBeanMethods = false)
+@Profile("dev")
 public class DataInitializer {
 
-    private static final Logger log = LoggerFactory.getLogger(DataInitializer.class);
+	private static final Logger log = LoggerFactory.getLogger(DataInitializer.class);
 
-    @Bean
-    public CommandLineRunner initDatabase(UsuarioRepository usuarioRepository) {
-        return args -> {
-            if (usuarioRepository.count() == 0) {
-                log.info("Inicializando datos de prueba en la tabla usuarios...");
+	@Bean
+	public CommandLineRunner inicializarUsuariosDeDesarrollo(UsuarioRepository usuarioRepository) {
+		return args -> {
+			if (usuarioRepository.count() > 0) {
+				log.info("La tabla usuario ya contiene registros, omitiendo inicializacion de desarrollo.");
+				return;
+			}
 
-                Usuario admin = new Usuario(
-                        null,
-                        null,
-                        "Administrador MediRecord",
-                        "admin@medirecord.com",
-                        "4180000000",
-                        "ADMIN",
-                        true,
-                        LocalDateTime.now()
-                );
+			usuarioRepository.save(new Usuario(
+					"Usuario", "Recordatorio", null,
+					"usuario@medirecord.com", "4181234567"));
 
-                Usuario usuario = new Usuario(
-                        null,
-                        null,
-                        "Usuario Recordatorio",
-                        "usuario@medirecord.com",
-                        "4181234567",
-                        "USER",
-                        true,
-                        LocalDateTime.now()
-                );
+			log.info("Usuario de desarrollo creado: usuario@medirecord.com.");
+		};
+	}
 
-                usuarioRepository.save(admin);
-                usuarioRepository.save(usuario);
-
-                log.info("Usuarios iniciales creados exitosamente: ADMIN y USER.");
-            } else {
-                log.info("La tabla usuarios ya contiene registros, omitiendo inicializacion.");
-            }
-        };
-    }
 }
