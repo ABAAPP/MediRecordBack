@@ -29,10 +29,12 @@ public class OpenApiConfig {
 								API del expediente clinico digital Medirecord.
 
 								### Autenticacion
-								1. Obtener un token en Keycloak (password grant, solo para integraciones):
-								`POST /realms/medirecord/protocol/openid-connect/token`
-								2. Enviarlo como `Authorization: Bearer <token>`.
-								3. En Swagger UI, usar el boton **Authorize** con el token(access token).
+								1. `POST /api/v1/auth/registro` crea la cuenta (datos de perfil y contrasena).
+								2. `POST /api/v1/auth/login` con `email` y `password` devuelve los tokens de la sesion.
+								3. Enviar `Authorization: Bearer <accessToken>` en cualquier peticion protegida.
+								4. `POST /api/v1/auth/refresh` renueva la sesion con el `refreshToken`.
+
+								Las contraseñas se almacenan hasheadas en Keycloak; la API nunca las guarda.
 								""")
 						.license(new License().name("Uso interno")))
 				.servers(List.of(new Server().url("/").description("Servidor actual")))
@@ -40,7 +42,7 @@ public class OpenApiConfig {
 						.type(SecurityScheme.Type.HTTP)
 						.scheme("bearer")
 						.bearerFormat("JWT")
-						.description("Access token JWT emitido por Keycloak (realm medirecord)")))
+						.description("Access token JWT emitido por Keycloak y devuelto por `/api/v1/auth/login`")))
 				.addSecurityItem(new SecurityRequirement().addList(SECURITY_SCHEME));
 	}
 

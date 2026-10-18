@@ -153,4 +153,36 @@ class UsuarioServiceTest {
 		}
 	}
 
+	@Nested
+	@DisplayName("identidad externa")
+	class IdentidadExterna {
+
+		@Test
+		@DisplayName("buscarPorKeycloakId devuelve la cuenta enlazada o vacio")
+		void buscaPorIdentidad() {
+			Usuario usuario = new Usuario("Ana", "Gomez", "Lopez", "ana.gomez@correo.com", null);
+			usuario.vincularKeycloakId("sub-123");
+			when(repository.findByKeycloakId("sub-123")).thenReturn(Optional.of(usuario));
+			when(repository.findByKeycloakId("otro")).thenReturn(Optional.empty());
+
+			assertThat(service.buscarPorKeycloakId("sub-123"))
+					.hasValueSatisfying(response -> assertThat(response.keycloakId()).isEqualTo("sub-123"));
+			assertThat(service.buscarPorKeycloakId("otro")).isEmpty();
+		}
+
+		@Test
+		@DisplayName("vincularIdentidad guarda el sub del token en la cuenta local")
+		void vinculaIdentidad() {
+			UUID id = UUID.randomUUID();
+			Usuario usuario = new Usuario("Ana", "Gomez", "Lopez", "ana.gomez@correo.com", null);
+			when(repository.findById(id)).thenReturn(Optional.of(usuario));
+			when(repository.save(usuario)).thenReturn(usuario);
+
+			UsuarioResponse response = service.vincularIdentidad(id, "sub-123");
+
+			assertThat(response.keycloakId()).isEqualTo("sub-123");
+			assertThat(usuario.getKeycloakId()).isEqualTo("sub-123");
+		}
+	}
+
 }

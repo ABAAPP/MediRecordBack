@@ -34,8 +34,14 @@ make up
 # 2) API desde el IDE (perfil dev, hot-reload)
 make run
 
-# 3) Token de prueba y llamada
-make token
+# 3) Registro y login (la API delega en Keycloak y devuelve el JWT)
+curl -s -X POST http://localhost:8080/api/v1/auth/registro \
+  -H 'Content-Type: application/json' \
+  -d '{"nombre":"Ana","apellidoPaterno":"Gomez","apellidoMaterno":"Lopez",
+       "email":"ana@correo.com","telefono":"+52 664 123 4567","password":"Secreto123"}'
+make login        # access token del usuario de desarrollo
+
+# 4) Llamada autenticada
 curl -H "Authorization: Bearer <TOKEN>" http://localhost:8080/api/v1/pacientes
 ```
 
@@ -48,9 +54,11 @@ Documentación interactiva: http://localhost:8080/swagger-ui.html
 | `admin` | `admin123` | ADMIN, MEDICO, RECEPCION |
 | `medico` | `medico123` | MEDICO |
 | `recepcion` | `recepcion123` | RECEPCION |
+| `usuario@medirecord.com` | `Medirecord123` | (siembra dev, se crea vía `POST /api/v1/auth/registro`) |
 
 Cliente confidencial: `medirecord-api` / `medirecord-secret` (password grant habilitado **solo para desarrollo**;
-en producción usar Authorization Code + PKCE con `medirecord-web`).
+en producción usar Authorization Code + PKCE con `medirecord-web`). Las contraseñas de los usuarios
+se almacenan **hasheadas en Keycloak**; la API nunca las guarda.
 
 ---
 
@@ -99,6 +107,28 @@ responsabilidad de Keycloak). Cada usuario tiene un `id` UUID único. El módulo
 define la relación 1:N usuario → medicamento (clave foránea `usuario_id`), base de los
 recordatorios.
 
+El módulo `autenticacion/` expone los endpoints públicos de sesión
+(`POST /api/v1/auth/{registro,login,refresh}`) y orquesta al proveedor de identidad:
+
+```
+autenticacion/
+├── AutenticacionController.java   # /api/v1/auth/** (publico)
+├── AutenticacionService.java      # registro, login y refresh (transaccional)
+├── dto/                           # RegistroRequest, LoginRequest, RefreshRequest, TokenResponse, LoginResponse
+├── keycloak/
+│   ├── KeycloakClient.java        # unica puerta de entrada a Keycloak (RestClient)
+│   ├── KeycloakProperties.java    # medirecord.keycloak.*
+│   └── dto/                       # KeycloakToken, NuevoUsuarioKeycloak
+└── exception/                     # 401/403/409/503 del flujo de sesion
+```
+
+Flujo del registro: la API crea primero la proyección local y **después** el usuario en
+Keycloak dentro de una misma transacción; si el proveedor rechaza el alta, la cuenta local
+se revierte y no queda un registro a medias. El login verifica las credenciales contra
+Keycloak y solo después resuelve la cuenta local (evita enumerar correos). El password grant
+se usa **solo para desarrollo/integraciones**: en producción sustituir por Authorization Code
++ PKCE con el cliente `medirecord-web`.
+
 ---
 
 ## 4. Convenciones
@@ -122,10 +152,25 @@ Petición ─► SecurityFilterChain (stateless) ─► JWT validado contra Keyc
                     │                                    │
                     ├─ /actuator/health, /actuator/prometheus  público
                     ├─ /v3/api-docs/**, /swagger-ui/**   público (desactivable: SWAGGER_ENABLED=false)
+                    ├─ /api/v1/auth/**                   público (registro, login y refresh)
                     ├─ /actuator/info, /actuator/metrics  requiere token
                     ├─ /api/v1/admin/**                  requiere ROLE_ADMIN
                     └─ resto                             autenticado
 ```
+
+### Endpoints de sesión
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| `POST` | `/api/v1/auth/registro` | Crea la cuenta en Keycloak y su proyección local; devuelve `201` + `Location` |
+| `POST` | `/api/v1/auth/login` | Verifica credenciales; devuelve `accessToken` y `refreshToken` |
+| `POST` | `/api/v1/auth/refresh` | Renueva los tokens si el `refreshToken` es válido y la cuenta está activa |
+
+Los errores siguen el catálogo `ErrorCode`: credenciales inválidas → `401 UNAUTHENTICATED`,
+cuenta desactivada → `403 FORBIDDEN`, correo duplicado → `409 DUPLICATED_RESOURCE`,
+Keycloak caído → `503 SERVICE_UNAVAILABLE`. Ningún mensaje distingue entre "correo
+inexistente" y "contraseña incorrecta" (evita enumeración de cuentas), y las contraseñas no
+se registran en ningún log.
 
 Mapeo de roles → autoridades de Spring:
 
@@ -152,7 +197,8 @@ Afinar permisos por operación con `@PreAuthorize("hasRole('ADMIN')")` en el ser
 | `make debug` | Levanta la API en suspendida (JDWP 5005) |
 | `make up` / `make up-app` | Infraestructura / stack completa con imagen |
 | `make down` | Detiene todo **y borra los volúmenes** |
-| `make token` | Obtiene un access token de `admin` |
+| `make token` | Obtiene un access token de `admin` (directo contra Keycloak) |
+| `make login` | Inicia sesión vía `POST /api/v1/auth/login` y muestra el access token |
 | `make psql` | Consola SQL contra el contenedor |
 
 Equivalentes sin `make`:
@@ -187,6 +233,12 @@ Todo es sobreescribible por variable de entorno o `--property`:
 | `DB_POOL_MAX_SIZE` | `10` | Tamaño máximo del pool |
 | `KEYCLOAK_ISSUER_URI` | `http://localhost:8081/realms/medirecord` | Emisor del token |
 | `KEYCLOAK_JWK_SET_URI` | derivado del issuer | Claves públicas (evita discovery al arrancar) |
+| `KEYCLOAK_BASE_URL` | `http://localhost:8081` | URL de Keycloak desde la API (registro/login). En Docker: `http://keycloak:8080` |
+| `KEYCLOAK_REALM` | `medirecord` | Realm donde se crean las cuentas |
+| `KEYCLOAK_CLIENT_ID` / `KEYCLOAK_CLIENT_SECRET` | `medirecord-api` / `medirecord-secret` | Cliente que emite los tokens de sesión |
+| `KEYCLOAK_ADMIN_REALM` / `KEYCLOAK_ADMIN_CLIENT_ID` | `master` / `admin-cli` | Cliente usado por la API para dar de alta usuarios |
+| `KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD` | `admin` / `admin123` | Credenciales de administración (**gestor de secretos en producción**) |
+| `DEV_USER_PASSWORD` | `Medirecord123` | Contraseña del usuario siembra del perfil `dev` |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000,...` | Orígenes permitidos |
 | `SWAGGER_ENABLED` | `true` (dev) / `false` (prod) | Documentación |
 | `LOG_LEVEL_APP` | `INFO` | Nivel de log de la app |
@@ -219,7 +271,11 @@ Testcontainers + cobertura), publica el reporte JaCoCo y valida el `docker build
 
 - [ ] Gestor de secretos (Vault / AWS Secrets Manager) en lugar de variables con contraseña.
 - [ ] `CORS_ALLOWED_ORIGINS` y `KEYCLOAK_ISSUER_URI` con HTTPS y `sslRequired=external` real.
-- [ ] Desactivar `directAccessGrantsEnabled` del cliente `medirecord-api`.
+- [ ] Sustituir `admin-cli` + credenciales de administrador por un **cliente de servicio** con rol
+      `manage-users` para el alta de usuarios (mínimo privilegio).
+- [ ] Migrar el login de `/api/v1/auth/login` de password grant a Authorization Code + PKCE
+      (cliente `medirecord-web`) y desactivar `directAccessGrantsEnabled` de `medirecord-api`.
+- [ ] Verificación del correo electrónico (`emailVerified` hoy es `false` al registrarse).
 - [ ] Cifrado a nivel de columna o TDE para datos clínicos, y bitácoras de auditoría inmutables.
 - [ ] Umbral mínimo de cobertura en JaCoCo (`check`) una vez estabilizado el modelo de dominio.
 - [ ] Migrar los usuarios de prueba del realm fuera del repositorio.

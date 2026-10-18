@@ -7,7 +7,7 @@ MVN := ./mvnw
 COMPOSE := docker compose
 
 .PHONY: help build test test-unit test-it verify run debug clean \
-        up down up-app logs psql token token-medico swagger db-reset fmt-check
+        up down up-app logs psql token token-medico login swagger db-reset fmt-check
 
 help: ## Muestra esta ayuda
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -64,6 +64,12 @@ token: ## Obtiene un access token del usuario admin (admin/admin123)
 		-d "client_secret=medirecord-secret" \
 		-d "username=admin" \
 		-d "password=admin123" | python3 -c "import sys,json;print(json.load(sys.stdin).get('access_token','ERROR: revisa que Keycloak este arriba'))"
+
+login: ## Inicia sesion via API y muestra el access token (usuario de desarrollo)
+	@curl -s -X POST "http://localhost:$${SERVER_PORT:-8080}/api/v1/auth/login" \
+		-H "Content-Type: application/json" \
+		-d '{"email":"usuario@medirecord.com","password":"'"$${DEV_USER_PASSWORD:-Medirecord123}"'"}' \
+		| python3 -c "import sys,json;r=json.load(sys.stdin);print(r.get('data',{}).get('tokens',{}).get('accessToken') or json.dumps(r))"
 
 swagger: ## Abre la documentacion en el navegador
 	@open "http://localhost:$${SERVER_PORT:-8080}/swagger-ui.html"
