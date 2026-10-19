@@ -1,5 +1,6 @@
 package com.api.medirecord.medicamento;
 
+import java.time.LocalDate;
 import java.util.UUID;
 
 import com.api.medirecord.common.persistence.AuditableEntity;
@@ -46,6 +47,12 @@ public class Medicamento extends AuditableEntity {
 	@Column(name = "frecuencia", length = 80)
 	private String frecuencia;
 
+	@Column(name = "fecha_inicio", nullable = false)
+	private LocalDate fechaInicio;
+
+	@Column(name = "fecha_fin")
+	private LocalDate fechaFin;
+
 	@Column(name = "activo", nullable = false)
 	private boolean activo = true;
 
@@ -53,11 +60,14 @@ public class Medicamento extends AuditableEntity {
 		// constructor para JPA
 	}
 
-	public Medicamento(Usuario usuario, String nombre, String dosis, String frecuencia) {
+	public Medicamento(Usuario usuario, String nombre, String dosis, String frecuencia,
+			LocalDate fechaInicio, LocalDate fechaFin) {
 		this.usuario = usuario;
 		this.nombre = nombre;
 		this.dosis = dosis;
 		this.frecuencia = frecuencia;
+		this.fechaInicio = fechaInicio;
+		this.fechaFin = fechaFin;
 		this.activo = true;
 	}
 
@@ -95,6 +105,22 @@ public class Medicamento extends AuditableEntity {
 
 	public void setFrecuencia(String frecuencia) {
 		this.frecuencia = frecuencia;
+	}
+
+	public LocalDate getFechaInicio() {
+		return fechaInicio;
+	}
+
+	public void setFechaInicio(LocalDate fechaInicio) {
+		this.fechaInicio = fechaInicio;
+	}
+
+	public LocalDate getFechaFin() {
+		return fechaFin;
+	}
+
+	public void setFechaFin(LocalDate fechaFin) {
+		this.fechaFin = fechaFin;
 	}
 
 	public boolean isActivo() {

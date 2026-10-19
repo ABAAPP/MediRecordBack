@@ -80,7 +80,7 @@ src/main/resources/
 ├── application.properties            # Configuracion comun
 ├── application-dev.properties        # Perfil por defecto: verboso, SQL logueado
 ├── application-prod.properties       # Produccion: fail-fast, sin docs, root en WARN
-└── db/migration/                     # Migraciones Flyway (V1 paciente, V2 usuario, V3 medicamento)
+└── db/migration/                     # Migraciones Flyway (V1 paciente, V2 usuario, V3+V4 medicamento)
 
 src/test/java/com/api/medirecord/
 ├── support/                          # Bases reutilizables de tests (Testcontainers)
@@ -96,8 +96,10 @@ El módulo `usuario/` guarda al usuario final (la persona que necesita recordato
 medicamentos) y su relación con Keycloak: la columna `keycloak_id` enlaza la cuenta con el claim
 `sub` del token, de modo que **nunca se almacenan contraseñas** (la autenticación es
 responsabilidad de Keycloak). Cada usuario tiene un `id` UUID único. El módulo `medicamento/`
-define la relación 1:N usuario → medicamento (clave foránea `usuario_id`), base de los
-recordatorios.
+define la relación 1:N usuario → medicamento (clave foránea `usuario_id`) con las fechas del
+tratamiento (`fecha_inicio` obligatoria, `fecha_fin` opcional: `null` = tratamiento vigente),
+base de los recordatorios. Sus endpoints son **personales**: el usuario se resuelve del JWT,
+de modo que nadie puede leer ni administrar medicamentos de otra cuenta.
 
 ---
 
@@ -126,6 +128,24 @@ Petición ─► SecurityFilterChain (stateless) ─► JWT validado contra Keyc
                     ├─ /api/v1/admin/**                  requiere ROLE_ADMIN
                     └─ resto                             autenticado
 ```
+
+### Endpoints de medicamentos (usuario autenticado)
+
+Recurso personal: no reciben id de usuario porque se resuelve del token JWT. Un id ajeno o
+inexistente responde `404` (no revela la existencia de medicamentos de otros).
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| `POST` | `/api/v1/medicamentos` | Registra un medicamento propio; `201` + `Location` |
+| `GET` | `/api/v1/medicamentos` | Lista los propios con paginación, `search` e `incluirInactivos` |
+| `GET` | `/api/v1/medicamentos/{id}` | Obtiene un medicamento propio |
+| `PUT` | `/api/v1/medicamentos/{id}` | Actualiza un medicamento propio |
+| `PATCH` | `/api/v1/medicamentos/{id}/desactivar` | Baja lógica |
+| `DELETE` | `/api/v1/medicamentos/{id}` | Alias de baja lógica |
+
+Reglas: `nombre` y `fechaInicio` son obligatorios; `fechaFin` es opcional (sin ella el
+tratamiento sigue **vigente**) y no puede ser anterior a `fechaInicio`
+(`400 VALIDATION_ERROR` con el detalle de las fechas).
 
 Mapeo de roles → autoridades de Spring:
 
