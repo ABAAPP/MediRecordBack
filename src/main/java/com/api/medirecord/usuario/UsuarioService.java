@@ -1,6 +1,7 @@
 package com.api.medirecord.usuario;
 
 import java.util.Locale;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.domain.Page;
@@ -69,6 +70,22 @@ public class UsuarioService {
 
 	public UsuarioResponse obtener(UUID id) {
 		return UsuarioResponse.from(obtenerEntidad(id));
+	}
+
+	/** Cuenta local asociada a una identidad externa (claim {@code sub}), si existe. */
+	public Optional<UsuarioResponse> buscarPorKeycloakId(String keycloakId) {
+		return repository.findByKeycloakId(keycloakId).map(UsuarioResponse::from);
+	}
+
+	/**
+	 * Enlaza la cuenta local con la identidad creada en el proveedor de identidad.
+	 * Se invoca al termino del registro, dentro de la misma transaccion.
+	 */
+	@Transactional
+	public UsuarioResponse vincularIdentidad(UUID id, String keycloakId) {
+		Usuario usuario = obtenerEntidad(id);
+		usuario.vincularKeycloakId(keycloakId);
+		return UsuarioResponse.from(repository.save(usuario));
 	}
 
 	public PageResponse<UsuarioResponse> buscar(String termino, boolean incluirInactivos, Pageable pageable) {
