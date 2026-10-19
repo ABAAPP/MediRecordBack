@@ -35,7 +35,8 @@ import tools.jackson.databind.json.JsonMapper;
  *   <li>{@code scope} -> {@code SCOPE_*}</li>
  * </ul>
  *
- * <p>Reglas por defecto: sesion sin estado, autenticacion obligatoria en toda la API y
+ * <p>Reglas por defecto: sesion sin estado, autenticacion obligatoria en toda la API
+ * (salvo {@code /api/v1/auth/**}, donde el cliente obtiene el token) y
  * {@code /api/v1/admin/**} restringida a rol ADMIN. Afinar por metodo con
  * {@code @PreAuthorize}.</p>
  */
@@ -49,8 +50,10 @@ public class SecurityConfig {
 	private static final String SCOPE_PREFIX = "SCOPE_";
 
 	/**
-	 * Endpoints publicos. Deliberadamente solo health y Prometheus: /actuator/info y
-	 * /actuator/metrics requieren token (pueden filtrar topologia interna).
+	 * Endpoints publicos: documentacion, health/Prometheus y el alta de sesion
+	 * ({@code /api/v1/auth/**} es donde el cliente obtiene el token, por definicion no
+	 * puede pedirlo autenticado). {@code /actuator/info} y {@code /actuator/metrics}
+	 * requieren token (pueden filtrar topologia interna).
 	 */
 	private static final String[] PUBLIC_ENDPOINTS = {
 			"/actuator/health",
@@ -59,7 +62,8 @@ public class SecurityConfig {
 			"/v3/api-docs",
 			"/v3/api-docs/**",
 			"/swagger-ui.html",
-			"/swagger-ui/**"
+			"/swagger-ui/**",
+			"/api/v1/auth/**"
 	};
 
 	@Bean
