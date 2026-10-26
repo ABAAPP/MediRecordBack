@@ -17,6 +17,7 @@ public record MedicamentoResponse(
 		@Schema(example = "Paracetamol") String nombre,
 		@Schema(example = "500 mg - 1 tableta") String dosis,
 		@Schema(example = "Cada 8 horas") String frecuencia,
+		@Schema(example = "08:00 AM", nullable = true) String horaProgramada,
 		@Schema(example = "Tomar con alimentos") String instrucciones,
 		@Schema(example = "2026-10-25") LocalDate fechaInicio,
 		@Schema(example = "2026-11-01", nullable = true) LocalDate fechaFin,
@@ -25,6 +26,22 @@ public record MedicamentoResponse(
 		Instant createdAt,
 		Instant updatedAt) {
 
+	public MedicamentoResponse(
+			UUID id,
+			String usuarioId,
+			String nombre,
+			String dosis,
+			String frecuencia,
+			String instrucciones,
+			LocalDate fechaInicio,
+			LocalDate fechaFin,
+			boolean vigente,
+			boolean activo,
+			Instant createdAt,
+			Instant updatedAt) {
+		this(id, usuarioId, nombre, dosis, frecuencia, null, instrucciones, fechaInicio, fechaFin, vigente, activo, createdAt, updatedAt);
+	}
+
 	public static MedicamentoResponse from(Medicamento medicamento) {
 		return new MedicamentoResponse(
 				medicamento.getId(),
@@ -32,6 +49,7 @@ public record MedicamentoResponse(
 				medicamento.getNombre(),
 				medicamento.getDosis(),
 				medicamento.getFrecuencia(),
+				medicamento.getHoraProgramada(),
 				medicamento.getInstrucciones(),
 				medicamento.getFechaInicio(),
 				medicamento.getFechaFin(),

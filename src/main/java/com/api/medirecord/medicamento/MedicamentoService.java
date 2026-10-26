@@ -1,6 +1,8 @@
 package com.api.medirecord.medicamento;
 
 import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.Locale;
 import java.util.UUID;
 
@@ -16,6 +18,8 @@ import com.api.medirecord.common.response.PageResponse;
 import com.api.medirecord.common.security.SecurityUtils;
 import com.api.medirecord.medicamento.dto.MedicamentoRequest;
 import com.api.medirecord.medicamento.dto.MedicamentoResponse;
+import com.api.medirecord.medicamento.dto.MobileMedicationRequest;
+import com.api.medirecord.medicamento.dto.MobileMedicationResponse;
 import com.api.medirecord.medicamento.exception.MedicamentoAccesoDenegadoException;
 import com.api.medirecord.medicamento.exception.MedicamentoFechasInvalidasException;
 import com.api.medirecord.medicamento.exception.MedicamentoNotFoundException;
@@ -33,6 +37,8 @@ import jakarta.persistence.criteria.Predicate;
 @Transactional(readOnly = true)
 public class MedicamentoService {
 
+	private static final DateTimeFormatter FORMATO_DIA_MES_ANIO = DateTimeFormatter.ofPattern("dd/MM/yyyy");
+
 	private final MedicamentoRepository repository;
 
 	public MedicamentoService(MedicamentoRepository repository) {
@@ -49,11 +55,39 @@ public class MedicamentoService {
 				request.nombre().trim(),
 				aplicarTrimOpcional(request.dosis()),
 				aplicarTrimOpcional(request.frecuencia()),
+				aplicarTrimOpcional(request.horaProgramada()),
 				aplicarTrimOpcional(request.instrucciones()),
 				request.fechaInicio(),
 				request.fechaFin());
 
 		return MedicamentoResponse.from(repository.save(medicamento));
+	}
+
+	/**
+	 * Registra un medicamento desde el contrato de la aplicacion movil
+	 * ({@code POST /api/medications}), asociandolo al usuario autenticado.
+	 */
+	@Transactional
+	public MobileMedicationResponse registrarDesdeApp(MobileMedicationRequest request) {
+		String usuarioId = obtenerUsuarioAutenticado();
+		LocalDate fechaInicio = parsearFecha(request.startDate(), "startDate");
+		LocalDate fechaFin = (request.endDate() == null || request.endDate().isBlank())
+				? null
+				: parsearFecha(request.endDate(), "endDate");
+
+		validarRangoFechas(fechaInicio, fechaFin);
+
+		Medicamento medicamento = new Medicamento(
+				usuarioId,
+				request.name().trim(),
+				request.dosage().trim(),
+				request.frequency().trim(),
+				request.scheduledTime().trim(),
+				aplicarTrimOpcional(request.instructions()),
+				fechaInicio,
+				fechaFin);
+
+		return MobileMedicationResponse.from(repository.save(medicamento));
 	}
 
 	@Transactional
@@ -65,6 +99,7 @@ public class MedicamentoService {
 		medicamento.setNombre(request.nombre().trim());
 		medicamento.setDosis(aplicarTrimOpcional(request.dosis()));
 		medicamento.setFrecuencia(aplicarTrimOpcional(request.frecuencia()));
+		medicamento.setHoraProgramada(aplicarTrimOpcional(request.horaProgramada()));
 		medicamento.setInstrucciones(aplicarTrimOpcional(request.instrucciones()));
 		medicamento.setFechaInicio(request.fechaInicio());
 		medicamento.setFechaFin(request.fechaFin());
@@ -111,6 +146,21 @@ public class MedicamentoService {
 	private static void validarRangoFechas(LocalDate fechaInicio, LocalDate fechaFin) {
 		if (fechaInicio != null && fechaFin != null && fechaFin.isBefore(fechaInicio)) {
 			throw new MedicamentoFechasInvalidasException(fechaInicio, fechaFin);
+		}
+	}
+
+	private static LocalDate parsearFecha(String valor, String campo) {
+		String limpio = valor.trim();
+		try {
+			if (limpio.contains("/")) {
+				return LocalDate.parse(limpio, FORMATO_DIA_MES_ANIO);
+			}
+			return LocalDate.parse(limpio);
+		} catch (DateTimeParseException ex) {
+			throw new ApiException(
+					ErrorCode.VALIDATION_ERROR,
+					"Formato de fecha invalido en '" + campo + "' (usa YYYY-MM-DD o DD/MM/AAAA)")
+					.withDetail("field", campo);
 		}
 	}
 
