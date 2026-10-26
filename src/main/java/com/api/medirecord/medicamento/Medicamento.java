@@ -40,6 +40,9 @@ public class Medicamento extends AuditableEntity {
 	@Column(name = "frecuencia", length = 100)
 	private String frecuencia;
 
+	@Column(name = "hora_programada", length = 20)
+	private String horaProgramada;
+
 	@Column(name = "instrucciones", length = 500)
 	private String instrucciones;
 
@@ -58,10 +61,16 @@ public class Medicamento extends AuditableEntity {
 
 	public Medicamento(String usuarioId, String nombre, String dosis, String frecuencia,
 			String instrucciones, LocalDate fechaInicio, LocalDate fechaFin) {
+		this(usuarioId, nombre, dosis, frecuencia, null, instrucciones, fechaInicio, fechaFin);
+	}
+
+	public Medicamento(String usuarioId, String nombre, String dosis, String frecuencia,
+			String horaProgramada, String instrucciones, LocalDate fechaInicio, LocalDate fechaFin) {
 		this.usuarioId = usuarioId;
 		this.nombre = nombre;
 		this.dosis = dosis;
 		this.frecuencia = frecuencia;
+		this.horaProgramada = horaProgramada;
 		this.instrucciones = instrucciones;
 		this.fechaInicio = fechaInicio;
 		this.fechaFin = fechaFin;
@@ -98,6 +107,14 @@ public class Medicamento extends AuditableEntity {
 
 	public void setFrecuencia(String frecuencia) {
 		this.frecuencia = frecuencia;
+	}
+
+	public String getHoraProgramada() {
+		return horaProgramada;
+	}
+
+	public void setHoraProgramada(String horaProgramada) {
+		this.horaProgramada = horaProgramada;
 	}
 
 	public String getInstrucciones() {
