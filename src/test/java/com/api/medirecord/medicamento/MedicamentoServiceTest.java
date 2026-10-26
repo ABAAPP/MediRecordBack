@@ -26,14 +26,17 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 
+import com.api.medirecord.common.error.ApiException;
 import com.api.medirecord.medicamento.dto.MedicamentoRequest;
 import com.api.medirecord.medicamento.dto.MedicamentoResponse;
+import com.api.medirecord.medicamento.dto.MobileMedicationRequest;
+import com.api.medirecord.medicamento.dto.MobileMedicationResponse;
 import com.api.medirecord.medicamento.exception.MedicamentoAccesoDenegadoException;
 import com.api.medirecord.medicamento.exception.MedicamentoFechasInvalidasException;
 import com.api.medirecord.medicamento.exception.MedicamentoNotFoundException;
 
 /**
- * Tests unitarios de las reglas de negocio de medicamentos (B-05).
+ * Tests unitarios de las reglas de negocio de medicamentos (B-05 y B-06).
  */
 @ExtendWith(MockitoExtension.class)
 class MedicamentoServiceTest {
@@ -70,12 +73,13 @@ class MedicamentoServiceTest {
 	class Crear {
 
 		@Test
-		@DisplayName("registra el medicamento con fecha de inicio, fecha de fin y lo asocia al usuario autenticado")
+		@DisplayName("registra el medicamento con fecha de inicio, fecha de fin, hora programada y lo asocia al usuario autenticado")
 		void guardaMedicamentoAsociadoAlUsuario() {
 			var request = new MedicamentoRequest(
 					"  Paracetamol 500mg  ",
 					" 1 tableta ",
 					" Cada 8 horas ",
+					" 08:00 AM ",
 					" Con alimentos ",
 					LocalDate.of(2026, 10, 25),
 					LocalDate.of(2026, 11, 5));
@@ -92,6 +96,7 @@ class MedicamentoServiceTest {
 			assertThat(saved.getNombre()).isEqualTo("Paracetamol 500mg");
 			assertThat(saved.getDosis()).isEqualTo("1 tableta");
 			assertThat(saved.getFrecuencia()).isEqualTo("Cada 8 horas");
+			assertThat(saved.getHoraProgramada()).isEqualTo("08:00 AM");
 			assertThat(saved.getInstrucciones()).isEqualTo("Con alimentos");
 			assertThat(saved.getFechaInicio()).isEqualTo(LocalDate.of(2026, 10, 25));
 			assertThat(saved.getFechaFin()).isEqualTo(LocalDate.of(2026, 11, 5));
@@ -99,6 +104,7 @@ class MedicamentoServiceTest {
 
 			assertThat(response.usuarioId()).isEqualTo(USUARIO_PROPIETARIO);
 			assertThat(response.nombre()).isEqualTo("Paracetamol 500mg");
+			assertThat(response.horaProgramada()).isEqualTo("08:00 AM");
 		}
 
 		@Test
@@ -134,6 +140,49 @@ class MedicamentoServiceTest {
 
 			assertThatThrownBy(() -> service.crear(request))
 					.isInstanceOf(MedicamentoFechasInvalidasException.class);
+
+			verify(repository, never()).save(any());
+		}
+
+		@Test
+		@DisplayName("registra desde la aplicacion movil parseando fechas dd/MM/yyyy y asociando al usuario autenticado")
+		void registraDesdeAppMovil() {
+			var request = new MobileMedicationRequest(
+					"Amoxicilina",
+					"500 mg - 1 capsula",
+					"25/10/2026",
+					"01/11/2026",
+					"Cada 8 horas",
+					"09:00 AM",
+					"Tomar con agua",
+					"correo-ignorado@test.com");
+
+			when(repository.save(any(Medicamento.class))).thenAnswer(inv -> inv.getArgument(0));
+
+			MobileMedicationResponse response = service.registrarDesdeApp(request);
+
+			assertThat(response.success()).isTrue();
+			assertThat(response.message()).contains("Amoxicilina");
+			assertThat(response.medication().userEmail()).isEqualTo(USUARIO_PROPIETARIO);
+			assertThat(response.medication().scheduledDate()).isEqualTo("2026-10-25");
+		}
+
+		@Test
+		@DisplayName("rechaza formato de fecha invalido desde la aplicacion movil")
+		void rechazaFechaInvalidaDesdeApp() {
+			var request = new MobileMedicationRequest(
+					"Amoxicilina",
+					"500 mg",
+					"fecha-invalida",
+					null,
+					"Diario",
+					"08:00 AM",
+					null,
+					null);
+
+			assertThatThrownBy(() -> service.registrarDesdeApp(request))
+					.isInstanceOf(ApiException.class)
+					.hasMessageContaining("startDate");
 
 			verify(repository, never()).save(any());
 		}
