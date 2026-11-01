@@ -15,6 +15,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -107,8 +108,15 @@ public class GlobalExceptionHandler {
 
 	@ExceptionHandler(MethodArgumentTypeMismatchException.class)
 	public ProblemDetail handleTypeMismatch(MethodArgumentTypeMismatchException ex, HttpServletRequest request) {
+		String typeName = ex.getRequiredType() != null ? ex.getRequiredType().getSimpleName() : "esperado";
 		return problem(ErrorCode.TYPE_MISMATCH,
-				"El parametro '" + ex.getName() + "' espera el tipo " + ex.getRequiredType().getSimpleName(), request);
+				"El parametro '" + ex.getName() + "' espera un valor de tipo " + typeName, request);
+	}
+
+	@ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+	public ProblemDetail handleMethodNotSupported(HttpRequestMethodNotSupportedException ex, HttpServletRequest request) {
+		return problem(ErrorCode.METHOD_NOT_ALLOWED,
+				"Metodo HTTP '" + ex.getMethod() + "' no soportado para este recurso", request);
 	}
 
 	@ExceptionHandler(NoResourceFoundException.class)
