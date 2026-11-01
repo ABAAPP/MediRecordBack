@@ -1,11 +1,14 @@
 package com.api.medirecord.medicamento;
 
 import java.net.URI;
+import java.time.LocalDate;
+import java.util.List;
 import java.util.UUID;
 
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -22,6 +25,7 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import com.api.medirecord.common.response.ApiResponse;
 import com.api.medirecord.common.response.PageResponse;
 import com.api.medirecord.config.OpenApiConfig;
+import com.api.medirecord.medicamento.dto.MedicamentoDelDiaResponse;
 import com.api.medirecord.medicamento.dto.MedicamentoRequest;
 import com.api.medirecord.medicamento.dto.MedicamentoResponse;
 
@@ -34,7 +38,7 @@ import jakarta.validation.Valid;
 
 /**
  * Endpoints para administrar y consultar los medicamentos asociados a la cuenta
- * del usuario autenticado.
+ * del usuario autenticado (B-05, B-06 y B-10).
  */
 @RestController
 @RequestMapping("/api/v1/medicamentos")
@@ -50,7 +54,7 @@ public class MedicamentoController {
 		this.service = service;
 	}
 
-	@Operation(summary = "Registra un medicamento asociado al usuario autenticado")
+	@Operation(summary = "Registra un medicamento asociado al usuario autenticado (B-06)")
 	@ApiResponses({
 			@io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "Medicamento registrado"),
 			@io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Datos invalidos o rango de fechas incoherente"),
@@ -64,6 +68,27 @@ public class MedicamentoController {
 				.buildAndExpand(created.id())
 				.toUri();
 		return ResponseEntity.created(location).body(ApiResponse.ok(MODULO + " registrado", created));
+	}
+
+	@Operation(
+			summary = "Consulta los medicamentos programados para el dia actual con su estado de toma (B-10)",
+			description = "Devuelve los medicamentos asociados a sus horarios para la fecha indicada, señalando si estan pendientes o realizados.")
+	@ApiResponses({
+			@io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Lista de medicamentos del dia obtenida exitosamente"),
+			@io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "No autenticado")
+	})
+	@GetMapping("/del-dia")
+	public ApiResponse<List<MedicamentoDelDiaResponse>> consultarMedicamentosDelDia(
+			@Parameter(description = "Fecha a consultar (formato ISO YYYY-MM-DD). Si se omite, se usa la fecha actual.")
+			@RequestParam(required = false)
+			@DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fecha) {
+		return ApiResponse.ok(service.consultarMedicamentosDelDia(fecha));
+	}
+
+	@Operation(summary = "Obtiene los medicamentos programados para el dia de hoy (B-10)")
+	@GetMapping("/hoy")
+	public ApiResponse<List<MedicamentoDelDiaResponse>> consultarMedicamentosHoy() {
+		return ApiResponse.ok(service.consultarMedicamentosDelDia(LocalDate.now()));
 	}
 
 	@Operation(summary = "Lista los medicamentos del usuario autenticado con filtros y paginacion")
