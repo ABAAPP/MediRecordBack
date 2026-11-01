@@ -1,10 +1,20 @@
 package com.api.medirecord.medicamento;
 
+import java.text.Normalizer;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -16,18 +26,24 @@ import com.api.medirecord.common.error.ApiException;
 import com.api.medirecord.common.error.ErrorCode;
 import com.api.medirecord.common.response.PageResponse;
 import com.api.medirecord.common.security.SecurityUtils;
+import com.api.medirecord.horario.Horario;
+import com.api.medirecord.horario.HorarioRepository;
+import com.api.medirecord.medicamento.dto.MedicamentoDelDiaResponse;
 import com.api.medirecord.medicamento.dto.MedicamentoRequest;
 import com.api.medirecord.medicamento.dto.MedicamentoResponse;
+import com.api.medirecord.medicamento.dto.MobileMedicationDoseDto;
 import com.api.medirecord.medicamento.dto.MobileMedicationRequest;
 import com.api.medirecord.medicamento.dto.MobileMedicationResponse;
 import com.api.medirecord.medicamento.exception.MedicamentoAccesoDenegadoException;
 import com.api.medirecord.medicamento.exception.MedicamentoFechasInvalidasException;
 import com.api.medirecord.medicamento.exception.MedicamentoNotFoundException;
+import com.api.medirecord.toma.TomaMedicamento;
+import com.api.medirecord.toma.TomaMedicamentoRepository;
 
 import jakarta.persistence.criteria.Predicate;
 
 /**
- * Reglas de negocio de medicamentos asociados a la cuenta del usuario.
+ * Reglas de negocio de medicamentos asociados a la cuenta del usuario (B-05, B-06 y B-10).
  *
  * <p>Garantiza el aislamiento por propietario: cada operacion obtiene el
  * usuario autenticado del contexto de seguridad y restringe el acceso a sus
@@ -38,11 +54,19 @@ import jakarta.persistence.criteria.Predicate;
 public class MedicamentoService {
 
 	private static final DateTimeFormatter FORMATO_DIA_MES_ANIO = DateTimeFormatter.ofPattern("dd/MM/yyyy");
+	private static final Pattern PATTERN_HORA = Pattern.compile("^(\\d{1,2}):(\\d{2})(?:\\s*(?i)(AM|PM))?$");
 
 	private final MedicamentoRepository repository;
+	private final HorarioRepository horarioRepository;
+	private final TomaMedicamentoRepository tomaRepository;
 
-	public MedicamentoService(MedicamentoRepository repository) {
+	public MedicamentoService(
+			MedicamentoRepository repository,
+			HorarioRepository horarioRepository,
+			TomaMedicamentoRepository tomaRepository) {
 		this.repository = repository;
+		this.horarioRepository = horarioRepository;
+		this.tomaRepository = tomaRepository;
 	}
 
 	@Transactional
@@ -118,7 +142,225 @@ public class MedicamentoService {
 		return PageResponse.from(resultados, MedicamentoResponse::from);
 	}
 
-	/** Baja logica del medicamento verificando que pertenezca al usuario autenticado. */
+	/**
+	 * Consulta los medicamentos del dia para el usuario autenticado (B-10).
+	 *
+	 * <p>Muestra los medicamentos asociados a sus horarios para la fecha indicada (por
+	 * defecto hoy), reflejando si cada toma esta pendiente o realizada. Si no hay
+	 * tomas programadas, devuelve una lista vacia valida.</p>
+	 */
+	public List<MedicamentoDelDiaResponse> consultarMedicamentosDelDia(LocalDate fecha) {
+		String usuarioId = obtenerUsuarioAutenticado();
+		LocalDate fechaObjetivo = fecha != null ? fecha : LocalDate.now();
+
+		List<Horario> horariosAplicables = obtenerHorariosDelDia(usuarioId, fechaObjetivo);
+		if (horariosAplicables.isEmpty()) {
+			return List.of();
+		}
+
+		List<TomaMedicamento> tomasFecha = tomaRepository.findByUsuarioIdAndFechaToma(usuarioId, fechaObjetivo);
+
+		return horariosAplicables.stream()
+				.map(horario -> {
+					Medicamento med = horario.getMedicamento();
+					TomaMedicamento tomaMatch = buscarTomaCorrespondiente(tomasFecha, horario);
+					boolean realizada = tomaMatch != null && tomaMatch.isRealizada();
+					String horaRealizada = realizada ? tomaMatch.getHoraToma() : null;
+
+					String instrucciones = (horario.getNotas() != null && !horario.getNotas().isBlank())
+							? horario.getNotas()
+							: (med != null ? med.getInstrucciones() : null);
+
+					return MedicamentoDelDiaResponse.de(
+							med != null ? med.getId() : null,
+							med != null ? med.getNombre() : "",
+							med != null ? med.getDosis() : "",
+							horario.getId(),
+							horario.getHoraAdministracion(),
+							horario.getFrecuencia(),
+							horario.getDiasSeleccionados(),
+							instrucciones,
+							fechaObjetivo,
+							realizada,
+							horaRealizada,
+							usuarioId);
+				})
+				.toList();
+	}
+
+	/**
+	 * Consulta los medicamentos del dia en formato consumible por la app movil (B-10: GET /api/medications/today).
+	 */
+	public List<MobileMedicationDoseDto> consultarDosisHoyMovil(LocalDate fecha, String userEmail) {
+		String usuarioId = resolverUsuario(userEmail);
+		LocalDate fechaObjetivo = fecha != null ? fecha : LocalDate.now();
+
+		List<Horario> horariosAplicables = obtenerHorariosDelDia(usuarioId, fechaObjetivo);
+		if (horariosAplicables.isEmpty()) {
+			return List.of();
+		}
+
+		List<TomaMedicamento> tomasFecha = tomaRepository.findByUsuarioIdAndFechaToma(usuarioId, fechaObjetivo);
+
+		return horariosAplicables.stream()
+				.map(horario -> {
+					Medicamento med = horario.getMedicamento();
+					String id = horario.getId() != null ? horario.getId().toString()
+							: (med != null && med.getId() != null ? med.getId().toString() : UUID.randomUUID().toString());
+					String instrucciones = (horario.getNotas() != null && !horario.getNotas().isBlank())
+							? horario.getNotas()
+							: (med != null ? med.getInstrucciones() : null);
+
+					TomaMedicamento tomaMatch = buscarTomaCorrespondiente(tomasFecha, horario);
+					boolean realizada = tomaMatch != null && tomaMatch.isRealizada();
+					String completedAt = realizada ? tomaMatch.getHoraToma() : null;
+
+					return new MobileMedicationDoseDto(
+							id,
+							med != null ? med.getNombre() : "",
+							med != null && med.getDosis() != null ? med.getDosis() : "",
+							horario.getHoraAdministracion(),
+							realizada,
+							instrucciones,
+							horario.getFrecuencia(),
+							horario.getDiasSeleccionados(),
+							usuarioId,
+							completedAt,
+							fechaObjetivo.toString());
+				})
+				.toList();
+	}
+
+	private List<Horario> obtenerHorariosDelDia(String usuarioId, LocalDate fecha) {
+		List<Horario> todos = new ArrayList<>(horarioRepository.findHorariosParaRecordatoriosPorUsuario(usuarioId));
+
+		Set<UUID> idsConHorario = todos.stream()
+				.map(Horario::getMedicamento)
+				.filter(Objects::nonNull)
+				.map(Medicamento::getId)
+				.filter(Objects::nonNull)
+				.collect(Collectors.toSet());
+
+		List<Medicamento> medicamentos = repository.findByUsuarioIdAndActivoTrueOrderByFechaInicioDesc(usuarioId);
+		for (Medicamento med : medicamentos) {
+			if (!idsConHorario.contains(med.getId()) && med.getHoraProgramada() != null && !med.getHoraProgramada().isBlank()) {
+				Horario horarioVirtual = new Horario(
+						med,
+						med.getHoraProgramada(),
+						med.getFrecuencia() != null ? med.getFrecuencia() : "Todos los días (Diario)",
+						Horario.TODOS_LOS_DIAS,
+						true,
+						med.getInstrucciones());
+				todos.add(horarioVirtual);
+			}
+		}
+
+		String diaSemana = obtenerDiaSemanaEspanol(fecha.getDayOfWeek());
+
+		return todos.stream()
+				.filter(h -> esTratamientoVigente(h.getMedicamento(), fecha))
+				.filter(h -> correspondeADiaSemana(h, diaSemana))
+				.sorted(comparadorCronologico())
+				.toList();
+	}
+
+	private static TomaMedicamento buscarTomaCorrespondiente(List<TomaMedicamento> tomas, Horario horario) {
+		if (tomas == null || tomas.isEmpty() || horario == null) {
+			return null;
+		}
+		for (TomaMedicamento t : tomas) {
+			if (horario.getId() != null && t.getHorario() != null && horario.getId().equals(t.getHorario().getId())) {
+				return t;
+			}
+			if (horario.getMedicamento() != null && t.getMedicamento() != null
+					&& horario.getMedicamento().getId().equals(t.getMedicamento().getId())
+					&& (t.getHorario() == null || horario.getId() == null)) {
+				return t;
+			}
+		}
+		return null;
+	}
+
+	private static boolean esTratamientoVigente(Medicamento medicamento, LocalDate fecha) {
+		if (medicamento == null || !medicamento.isActivo() || medicamento.getFechaInicio() == null) {
+			return false;
+		}
+		if (fecha.isBefore(medicamento.getFechaInicio())) {
+			return false;
+		}
+		return medicamento.getFechaFin() == null || !fecha.isAfter(medicamento.getFechaFin());
+	}
+
+	private static boolean correspondeADiaSemana(Horario horario, String diaSemana) {
+		String diaNormalizado = normalizarTexto(diaSemana);
+		List<String> diasConfigurados = horario.getDiasSeleccionados();
+
+		if (diasConfigurados == null || diasConfigurados.isEmpty()) {
+			return true;
+		}
+
+		String frecuenciaNormalizada = normalizarTexto(horario.getFrecuencia());
+		if (frecuenciaNormalizada.contains("diario") || frecuenciaNormalizada.contains("todos los dias")) {
+			return true;
+		}
+
+		return diasConfigurados.stream()
+				.map(MedicamentoService::normalizarTexto)
+				.anyMatch(dia -> dia.equals(diaNormalizado));
+	}
+
+	private static Comparator<Horario> comparadorCronologico() {
+		return Comparator.comparingInt((Horario h) -> parsearMinutos(h.getHoraAdministracion()))
+				.thenComparing(h -> h.getMedicamento() != null ? h.getMedicamento().getNombre() : "");
+	}
+
+	public static int parsearMinutos(String horaStr) {
+		if (horaStr == null || horaStr.isBlank()) {
+			return Integer.MAX_VALUE;
+		}
+		Matcher matcher = PATTERN_HORA.matcher(horaStr.trim());
+		if (!matcher.find()) {
+			return Integer.MAX_VALUE;
+		}
+		try {
+			int hora = Integer.parseInt(matcher.group(1));
+			int minutos = Integer.parseInt(matcher.group(2));
+			String amPm = matcher.group(3);
+
+			if (amPm != null) {
+				if (amPm.equalsIgnoreCase("PM") && hora < 12) {
+					hora += 12;
+				} else if (amPm.equalsIgnoreCase("AM") && hora == 12) {
+					hora = 0;
+				}
+			}
+			return hora * 60 + minutos;
+		} catch (NumberFormatException e) {
+			return Integer.MAX_VALUE;
+		}
+	}
+
+	private static String normalizarTexto(String texto) {
+		if (texto == null) {
+			return "";
+		}
+		return Normalizer.normalize(texto.trim().toLowerCase(Locale.ROOT), Normalizer.Form.NFD)
+				.replaceAll("\\p{M}", "");
+	}
+
+	private static String obtenerDiaSemanaEspanol(DayOfWeek dow) {
+		return switch (dow) {
+			case MONDAY -> "Lunes";
+			case TUESDAY -> "Martes";
+			case WEDNESDAY -> "Miércoles";
+			case THURSDAY -> "Jueves";
+			case FRIDAY -> "Viernes";
+			case SATURDAY -> "Sábado";
+			case SUNDAY -> "Domingo";
+		};
+	}
+
+	/** Baja logica: los datos clinicos no se borran fisicamente. */
 	@Transactional
 	public void desactivar(UUID id) {
 		String usuarioId = obtenerUsuarioAutenticado();
@@ -135,6 +377,22 @@ public class MedicamentoService {
 			throw new MedicamentoAccesoDenegadoException(id);
 		}
 		return medicamento;
+	}
+
+	private static String resolverUsuario(String userEmailParam) {
+		String usuarioAutenticado = SecurityUtils.currentUsername()
+				.filter(u -> !u.isBlank())
+				.orElse(null);
+
+		if (usuarioAutenticado != null) {
+			return usuarioAutenticado;
+		}
+
+		if (userEmailParam != null && !userEmailParam.isBlank()) {
+			return userEmailParam.trim();
+		}
+
+		throw new ApiException(ErrorCode.UNAUTHENTICATED);
 	}
 
 	private static String obtenerUsuarioAutenticado() {
