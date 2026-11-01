@@ -16,14 +16,22 @@ public final class PostgresTestContainerFactory {
 	public static final String USERNAME = "medirecord";
 	public static final String PASSWORD = "medirecord";
 
+	@SuppressWarnings("resource")
+	private static final PostgreSQLContainer<?> CONTAINER = new PostgreSQLContainer<>(DockerImageName.parse(IMAGE))
+			.withDatabaseName(DATABASE)
+			.withUsername(USERNAME)
+			.withPassword(PASSWORD)
+			.withReuse(true);
+
+	static {
+		CONTAINER.start();
+	}
+
 	private PostgresTestContainerFactory() {
 	}
 
-	public static PostgreSQLContainer nuevoContenedor() {
-		return new PostgreSQLContainer(DockerImageName.parse(IMAGE))
-				.withDatabaseName(DATABASE)
-				.withUsername(USERNAME)
-				.withPassword(PASSWORD);
+	public static PostgreSQLContainer<?> nuevoContenedor() {
+		return CONTAINER;
 	}
 
 }

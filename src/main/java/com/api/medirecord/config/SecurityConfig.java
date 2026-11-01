@@ -49,10 +49,10 @@ public class SecurityConfig {
 	private static final String SCOPE_PREFIX = "SCOPE_";
 
 	/**
-	 * Endpoints publicos. Deliberadamente solo health y Prometheus: /actuator/info y
-	 * /actuator/metrics requieren token (pueden filtrar topologia interna).
+	 * Endpoints publicos. Permite acceso sin token a registro/login y recursos de diagnostico/docs.
 	 */
 	private static final String[] PUBLIC_ENDPOINTS = {
+			"/api/auth/**",
 			"/actuator/health",
 			"/actuator/health/**",
 			"/actuator/prometheus",
