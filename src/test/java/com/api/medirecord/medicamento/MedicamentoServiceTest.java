@@ -25,18 +25,25 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import com.api.medirecord.common.error.ApiException;
+import com.api.medirecord.horario.Horario;
+import com.api.medirecord.horario.HorarioRepository;
+import com.api.medirecord.medicamento.dto.MedicamentoDelDiaResponse;
 import com.api.medirecord.medicamento.dto.MedicamentoRequest;
 import com.api.medirecord.medicamento.dto.MedicamentoResponse;
+import com.api.medirecord.medicamento.dto.MobileMedicationDoseDto;
 import com.api.medirecord.medicamento.dto.MobileMedicationRequest;
 import com.api.medirecord.medicamento.dto.MobileMedicationResponse;
 import com.api.medirecord.medicamento.exception.MedicamentoAccesoDenegadoException;
 import com.api.medirecord.medicamento.exception.MedicamentoFechasInvalidasException;
 import com.api.medirecord.medicamento.exception.MedicamentoNotFoundException;
+import com.api.medirecord.toma.TomaMedicamento;
+import com.api.medirecord.toma.TomaMedicamentoRepository;
 
 /**
- * Tests unitarios de las reglas de negocio de medicamentos (B-05 y B-06).
+ * Tests unitarios de las reglas de negocio de medicamentos (B-05, B-06 y B-10).
  */
 @ExtendWith(MockitoExtension.class)
 class MedicamentoServiceTest {
@@ -46,6 +53,12 @@ class MedicamentoServiceTest {
 
 	@Mock
 	private MedicamentoRepository repository;
+
+	@Mock
+	private HorarioRepository horarioRepository;
+
+	@Mock
+	private TomaMedicamentoRepository tomaRepository;
 
 	@InjectMocks
 	private MedicamentoService service;
@@ -66,6 +79,26 @@ class MedicamentoServiceTest {
 				"N/A",
 				List.of(new SimpleGrantedAuthority("ROLE_MEDICO")));
 		SecurityContextHolder.getContext().setAuthentication(auth);
+	}
+
+	private static Medicamento crearMedicamento(String usuarioId, String nombre, LocalDate inicio, LocalDate fin) {
+		Medicamento m = new Medicamento(
+				usuarioId,
+				nombre,
+				"500 mg",
+				"Cada 8 horas",
+				"08:00 AM",
+				"Con alimentos",
+				inicio,
+				fin);
+		ReflectionTestUtils.setField(m, "id", UUID.randomUUID());
+		return m;
+	}
+
+	private static Horario crearHorario(Medicamento med, String hora, List<String> dias) {
+		Horario h = new Horario(med, hora, "Diario", dias, true, null);
+		ReflectionTestUtils.setField(h, "id", UUID.randomUUID());
+		return h;
 	}
 
 	@Nested
@@ -185,6 +218,73 @@ class MedicamentoServiceTest {
 					.hasMessageContaining("startDate");
 
 			verify(repository, never()).save(any());
+		}
+	}
+
+	@Nested
+	@DisplayName("consultar medicamentos del dia (B-10)")
+	class ConsultarMedicamentosDelDia {
+
+		@Test
+		@DisplayName("devuelve medicamentos asociados a sus horarios e indica estado pendiente o realizada")
+		void consultaMedicamentosDelDiaConEstado() {
+			// 2026-10-26 es Lunes
+			LocalDate lunes = LocalDate.of(2026, 10, 26);
+			Medicamento med1 = crearMedicamento(USUARIO_PROPIETARIO, "Paracetamol", LocalDate.of(2026, 10, 1), null);
+			Medicamento med2 = crearMedicamento(USUARIO_PROPIETARIO, "Omeprazol", LocalDate.of(2026, 10, 1), null);
+
+			Horario h1 = crearHorario(med1, "08:00 AM", List.of("Lunes", "Miércoles", "Viernes"));
+			Horario h2 = crearHorario(med2, "09:00 AM", Horario.TODOS_LOS_DIAS);
+
+			when(horarioRepository.findHorariosParaRecordatoriosPorUsuario(USUARIO_PROPIETARIO))
+					.thenReturn(List.of(h1, h2));
+			when(repository.findByUsuarioIdAndActivoTrueOrderByFechaInicioDesc(USUARIO_PROPIETARIO))
+					.thenReturn(List.of(med1, med2));
+
+			// Simulamos que la primera toma ya fue realizada
+			TomaMedicamento tomaRealizada = new TomaMedicamento(
+					med1,
+					h1,
+					USUARIO_PROPIETARIO,
+					lunes,
+					"08:05 AM",
+					true,
+					null);
+			when(tomaRepository.findByUsuarioIdAndFechaToma(USUARIO_PROPIETARIO, lunes))
+					.thenReturn(List.of(tomaRealizada));
+
+			List<MedicamentoDelDiaResponse> delDia = service.consultarMedicamentosDelDia(lunes);
+
+			assertThat(delDia).hasSize(2);
+
+			MedicamentoDelDiaResponse r1 = delDia.get(0);
+			assertThat(r1.nombre()).isEqualTo("Paracetamol");
+			assertThat(r1.horaProgramada()).isEqualTo("08:00 AM");
+			assertThat(r1.realizada()).isTrue();
+			assertThat(r1.horaRealizada()).isEqualTo("08:05 AM");
+			assertThat(r1.estado()).isEqualTo("REALIZADA");
+
+			MedicamentoDelDiaResponse r2 = delDia.get(1);
+			assertThat(r2.nombre()).isEqualTo("Omeprazol");
+			assertThat(r2.horaProgramada()).isEqualTo("09:00 AM");
+			assertThat(r2.realizada()).isFalse();
+			assertThat(r2.horaRealizada()).isNull();
+			assertThat(r2.estado()).isEqualTo("PENDIENTE");
+		}
+
+		@Test
+		@DisplayName("devuelve una respuesta valida vacia si no existen medicamentos programados para el dia")
+		void devuelveVacioSiNoHayMedicamentos() {
+			when(horarioRepository.findHorariosParaRecordatoriosPorUsuario(USUARIO_PROPIETARIO))
+					.thenReturn(List.of());
+			when(repository.findByUsuarioIdAndActivoTrueOrderByFechaInicioDesc(USUARIO_PROPIETARIO))
+					.thenReturn(List.of());
+
+			List<MedicamentoDelDiaResponse> delDia = service.consultarMedicamentosDelDia(LocalDate.now());
+			assertThat(delDia).isNotNull().isEmpty();
+
+			List<MobileMedicationDoseDto> dosisMovil = service.consultarDosisHoyMovil(LocalDate.now(), USUARIO_PROPIETARIO);
+			assertThat(dosisMovil).isNotNull().isEmpty();
 		}
 	}
 
