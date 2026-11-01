@@ -7,7 +7,9 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Matcher;
@@ -27,13 +29,15 @@ import com.api.medirecord.medicamento.MedicamentoRepository;
 import com.api.medirecord.medicamento.dto.MobileMedicationDoseDto;
 import com.api.medirecord.recordatorio.dto.MobileMedicationReminderDto;
 import com.api.medirecord.recordatorio.dto.RecordatorioResponse;
+import com.api.medirecord.toma.TomaMedicamento;
+import com.api.medirecord.toma.TomaMedicamentoRepository;
 
 /**
- * Servicio de logica de negocio para la consulta y generacion de recordatorios (B-08).
+ * Servicio de logica de negocio para la consulta y generacion de recordatorios (B-08 y B-09).
  *
  * <p>Identifica los recordatorios aplicables a la fecha y usuario consultados,
- * relacionando los medicamentos y horarios correspondientes, considerando la
- * vigencia del tratamiento y los dias de la semana seleccionados.</p>
+ * relacionando los medicamentos y horarios correspondientes, e integrando el estado
+ * de las tomas realizadas almacenadas en PostgreSQL.</p>
  */
 @Service
 @Transactional(readOnly = true)
@@ -43,10 +47,15 @@ public class RecordatorioService {
 
 	private final HorarioRepository horarioRepository;
 	private final MedicamentoRepository medicamentoRepository;
+	private final TomaMedicamentoRepository tomaRepository;
 
-	public RecordatorioService(HorarioRepository horarioRepository, MedicamentoRepository medicamentoRepository) {
+	public RecordatorioService(
+			HorarioRepository horarioRepository,
+			MedicamentoRepository medicamentoRepository,
+			TomaMedicamentoRepository tomaRepository) {
 		this.horarioRepository = horarioRepository;
 		this.medicamentoRepository = medicamentoRepository;
+		this.tomaRepository = tomaRepository;
 	}
 
 	/**
@@ -65,7 +74,7 @@ public class RecordatorioService {
 
 	/**
 	 * Consulta los recordatorios activos del usuario para la aplicacion movil
-	 * ({@code GET /api/reminders}).
+	 * ({@code GET /api/reminders}), reflejando tomas completadas para hoy.
 	 */
 	public List<MobileMedicationReminderDto> consultarRecordatoriosMovil(String userEmail) {
 		String usuarioId = resolverUsuario(userEmail);
@@ -77,20 +86,49 @@ public class RecordatorioService {
 			horarios = horarioRepository.findHorariosParaRecordatoriosPorUsuario(usuarioId);
 		}
 
+		List<TomaMedicamento> tomasHoy = tomaRepository.findByUsuarioIdAndFechaToma(usuarioId, hoy);
+
 		return horarios.stream()
 				.sorted(comparadorCronologico())
-				.map(MobileMedicationReminderDto::from)
+				.map(horario -> {
+					TomaMedicamento tomaMatch = buscarTomaCorrespondiente(tomasHoy, horario);
+					boolean completada = tomaMatch != null && tomaMatch.isRealizada();
+					String completedAt = completada ? tomaMatch.getHoraToma() : null;
+
+					Medicamento med = horario.getMedicamento();
+					String id = horario.getId() != null
+							? horario.getId().toString()
+							: (med != null && med.getId() != null ? med.getId().toString() : UUID.randomUUID().toString());
+					String medId = (med != null && med.getId() != null) ? med.getId().toString() : id;
+					String instrucciones = (horario.getNotas() != null && !horario.getNotas().isBlank())
+							? horario.getNotas()
+							: (med != null ? med.getInstrucciones() : null);
+
+					return new MobileMedicationReminderDto(
+							id,
+							medId,
+							med != null ? med.getNombre() : "",
+							med != null && med.getDosis() != null ? med.getDosis() : "",
+							horario.getHoraAdministracion(),
+							horario.getFrecuencia(),
+							horario.getDiasSeleccionados(),
+							instrucciones,
+							completada,
+							med != null ? med.getUsuarioId() : null,
+							completedAt);
+				})
 				.toList();
 	}
 
 	/**
 	 * Consulta las dosis o tomas de medicamentos de una fecha dada para la
-	 * aplicacion movil ({@code GET /api/medications/today}).
+	 * aplicacion movil ({@code GET /api/medications/today}), reflejando su estado de realizacion.
 	 */
 	public List<MobileMedicationDoseDto> consultarDosisFechaMovil(LocalDate fecha, String userEmail) {
 		String usuarioId = resolverUsuario(userEmail);
 		LocalDate fechaObjetivo = fecha != null ? fecha : LocalDate.now();
 		List<Horario> horarios = obtenerHorariosFiltrados(usuarioId, fechaObjetivo);
+		List<TomaMedicamento> tomasFecha = tomaRepository.findByUsuarioIdAndFechaToma(usuarioId, fechaObjetivo);
 
 		return horarios.stream()
 				.map(horario -> {
@@ -101,20 +139,41 @@ public class RecordatorioService {
 							? horario.getNotas()
 							: (med != null ? med.getInstrucciones() : null);
 
+					TomaMedicamento tomaMatch = buscarTomaCorrespondiente(tomasFecha, horario);
+					boolean completada = tomaMatch != null && tomaMatch.isRealizada();
+					String completedAt = completada ? tomaMatch.getHoraToma() : null;
+
 					return new MobileMedicationDoseDto(
 							id,
 							med != null ? med.getNombre() : "",
 							med != null && med.getDosis() != null ? med.getDosis() : "",
 							horario.getHoraAdministracion(),
-							false,
+							completada,
 							instrucciones,
 							horario.getFrecuencia(),
 							horario.getDiasSeleccionados(),
 							usuarioId,
-							null,
+							completedAt,
 							fechaObjetivo.toString());
 				})
 				.toList();
+	}
+
+	private static TomaMedicamento buscarTomaCorrespondiente(List<TomaMedicamento> tomas, Horario horario) {
+		if (tomas == null || tomas.isEmpty() || horario == null) {
+			return null;
+		}
+		for (TomaMedicamento t : tomas) {
+			if (horario.getId() != null && t.getHorario() != null && horario.getId().equals(t.getHorario().getId())) {
+				return t;
+			}
+			if (horario.getMedicamento() != null && t.getMedicamento() != null
+					&& horario.getMedicamento().getId().equals(t.getMedicamento().getId())
+					&& (t.getHorario() == null || horario.getId() == null)) {
+				return t;
+			}
+		}
+		return null;
 	}
 
 	private List<Horario> obtenerHorariosFiltrados(String usuarioId, LocalDate fecha) {

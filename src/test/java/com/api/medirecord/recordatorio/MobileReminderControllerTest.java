@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -31,9 +32,12 @@ import com.api.medirecord.config.CorsProperties;
 import com.api.medirecord.config.SecurityConfig;
 import com.api.medirecord.medicamento.dto.MobileMedicationDoseDto;
 import com.api.medirecord.recordatorio.dto.MobileMedicationReminderDto;
+import com.api.medirecord.toma.TomaService;
+import com.api.medirecord.toma.dto.CompleteReminderRequest;
+import com.api.medirecord.toma.dto.CompleteReminderResponse;
 
 /**
- * Tests de los endpoints consumidos por la app movil (B-08: /api/reminders y /api/medications/today).
+ * Tests de los endpoints consumidos por la app movil (B-08 y B-09).
  */
 @WebMvcTest(MobileReminderController.class)
 @Import({ SecurityConfig.class, CorsConfig.class, MobileReminderControllerTest.TestCorsProperties.class })
@@ -58,7 +62,10 @@ class MobileReminderControllerTest {
 	private MockMvc mockMvc;
 
 	@MockitoBean
-	private RecordatorioService service;
+	private RecordatorioService recordatorioService;
+
+	@MockitoBean
+	private TomaService tomaService;
 
 	@MockitoBean
 	private JwtDecoder jwtDecoder;
@@ -88,7 +95,7 @@ class MobileReminderControllerTest {
 				"usuario-123",
 				null);
 
-		given(service.consultarRecordatoriosMovil(anyString())).willReturn(List.of(reminder));
+		given(recordatorioService.consultarRecordatoriosMovil(anyString())).willReturn(List.of(reminder));
 
 		mockMvc.perform(get("/api/reminders")
 						.with(user("usuario-123").roles("MEDICO"))
@@ -114,7 +121,7 @@ class MobileReminderControllerTest {
 				null,
 				"2026-10-31");
 
-		given(service.consultarDosisFechaMovil(any(LocalDate.class), anyString()))
+		given(recordatorioService.consultarDosisFechaMovil(any(LocalDate.class), anyString()))
 				.willReturn(List.of(dose));
 
 		mockMvc.perform(get("/api/medications/today")
@@ -124,6 +131,72 @@ class MobileReminderControllerTest {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$[0].name").value("Amoxicilina"))
 				.andExpect(jsonPath("$[0].scheduledTime").value("09:00 AM"));
+	}
+
+	@Test
+	@DisplayName("POST /api/reminders/{id}/complete marca el recordatorio como realizado")
+	void completeReminder() throws Exception {
+		var reminder = new MobileMedicationReminderDto(
+				"1",
+				"med-1",
+				"Paracetamol",
+				"500 mg",
+				"08:00 AM",
+				"Cada 8 horas",
+				List.of("Lunes", "Martes"),
+				null,
+				true,
+				"usuario-123",
+				"08:05 AM");
+
+		var response = new CompleteReminderResponse(
+				true,
+				"Toma de 'Paracetamol' marcada como realizada",
+				"1",
+				"08:05 AM",
+				reminder);
+
+		given(tomaService.marcarRecordatorioCompletado(anyString(), any(CompleteReminderRequest.class)))
+				.willReturn(response);
+
+		mockMvc.perform(post("/api/reminders/1/complete")
+						.with(user("usuario-123").roles("MEDICO"))
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{
+								  "reminderId": "1",
+								  "completedAt": "08:05 AM"
+								}
+								"""))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.success").value(true))
+				.andExpect(jsonPath("$.completedAt").value("08:05 AM"))
+				.andExpect(jsonPath("$.updatedReminder.isCompleted").value(true));
+	}
+
+	@Test
+	@DisplayName("POST /api/medications/{id}/toggle alterna el estado de la dosis")
+	void toggleDoseStatus() throws Exception {
+		var dose = new MobileMedicationDoseDto(
+				"1",
+				"Paracetamol",
+				"500 mg",
+				"08:00 AM",
+				true,
+				null,
+				"Diario",
+				List.of("Lunes"),
+				"usuario-123",
+				"08:05 AM",
+				"2026-10-31");
+
+		given(tomaService.alternarEstadoToma("1")).willReturn(dose);
+
+		mockMvc.perform(post("/api/medications/1/toggle")
+						.with(user("usuario-123").roles("MEDICO")))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.isCompleted").value(true))
+				.andExpect(jsonPath("$.completedAt").value("08:05 AM"));
 	}
 
 }

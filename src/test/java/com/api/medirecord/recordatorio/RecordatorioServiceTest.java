@@ -1,6 +1,8 @@
 package com.api.medirecord.recordatorio;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 import java.time.LocalDate;
@@ -27,9 +29,11 @@ import com.api.medirecord.medicamento.MedicamentoRepository;
 import com.api.medirecord.medicamento.dto.MobileMedicationDoseDto;
 import com.api.medirecord.recordatorio.dto.MobileMedicationReminderDto;
 import com.api.medirecord.recordatorio.dto.RecordatorioResponse;
+import com.api.medirecord.toma.TomaMedicamento;
+import com.api.medirecord.toma.TomaMedicamentoRepository;
 
 /**
- * Tests unitarios del servicio de recordatorios (B-08).
+ * Tests unitarios del servicio de recordatorios (B-08 y B-09).
  */
 @ExtendWith(MockitoExtension.class)
 class RecordatorioServiceTest {
@@ -41,6 +45,9 @@ class RecordatorioServiceTest {
 
 	@Mock
 	private MedicamentoRepository medicamentoRepository;
+
+	@Mock
+	private TomaMedicamentoRepository tomaRepository;
 
 	@InjectMocks
 	private RecordatorioService service;
@@ -182,8 +189,8 @@ class RecordatorioServiceTest {
 	}
 
 	@Test
-	@DisplayName("Los datos estan disponibles para la app movil en formato de recordatorios y dosis del dia")
-	void datosDisponiblesParaAppMovil() {
+	@DisplayName("Los datos estan disponibles para la app movil y reflejan tomas realizadas almacenadas")
+	void datosDisponiblesParaAppMovilReflejanTomasRealizadas() {
 		Medicamento med = crearMedicamento("Omeprazol", LocalDate.of(2026, 10, 1), null);
 		Horario horario = crearHorario(med, "07:00 AM", "Diario", Horario.TODOS_LOS_DIAS, true, "En ayunas");
 
@@ -192,14 +199,30 @@ class RecordatorioServiceTest {
 		when(medicamentoRepository.findByUsuarioIdAndActivoTrueOrderByFechaInicioDesc(USUARIO_PROPIETARIO))
 				.thenReturn(List.of(med));
 
+		TomaMedicamento tomaRealizada = new TomaMedicamento(
+				med,
+				horario,
+				USUARIO_PROPIETARIO,
+				LocalDate.now(),
+				"07:05 AM",
+				true,
+				"Completado");
+
+		when(tomaRepository.findByUsuarioIdAndFechaToma(eq(USUARIO_PROPIETARIO), any(LocalDate.class)))
+				.thenReturn(List.of(tomaRealizada));
+
 		List<MobileMedicationReminderDto> reminders = service.consultarRecordatoriosMovil(USUARIO_PROPIETARIO);
 		assertThat(reminders).hasSize(1);
 		assertThat(reminders.getFirst().medicationName()).isEqualTo("Omeprazol");
 		assertThat(reminders.getFirst().scheduledTime()).isEqualTo("07:00 AM");
+		assertThat(reminders.getFirst().isCompleted()).isTrue();
+		assertThat(reminders.getFirst().completedAt()).isEqualTo("07:05 AM");
 
 		List<MobileMedicationDoseDto> dosis = service.consultarDosisFechaMovil(LocalDate.now(), USUARIO_PROPIETARIO);
 		assertThat(dosis).hasSize(1);
 		assertThat(dosis.getFirst().name()).isEqualTo("Omeprazol");
+		assertThat(dosis.getFirst().isCompleted()).isTrue();
+		assertThat(dosis.getFirst().completedAt()).isEqualTo("07:05 AM");
 	}
 
 }
