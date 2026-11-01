@@ -37,7 +37,19 @@ import jakarta.validation.ConstraintViolationException;
 import jakarta.validation.Path;
 
 /**
- * Suite de pruebas unitarias para validaciones en {@link GlobalExceptionHandler} (B-11).
+ * Suite de pruebas unitarias para {@link GlobalExceptionHandler} (Requerimiento B-11).
+ *
+ * <p>Verifica el cumplimiento de todos los criterios de aceptacion del requerimiento:
+ * <ul>
+ *   <li>1. Los campos obligatorios son validados (400 VALIDATION_ERROR y lista de errores).</li>
+ *   <li>2. Se rechazan datos con formatos invalidos (400 MALFORMED_REQUEST / TYPE_MISMATCH).</li>
+ *   <li>3. Se manejan errores de autenticacion (401 UNAUTHENTICATED).</li>
+ *   <li>4. Se manejan recursos inexistentes (404 NOT_FOUND).</li>
+ *   <li>5. Se manejan errores de acceso no autorizado (403 FORBIDDEN).</li>
+ *   <li>6. Las respuestas HTTP utilizan codigos apropiados (400, 401, 403, 404, 405, 409, 500).</li>
+ *   <li>7. Los mensajes de error tienen una estructura consistente (RFC 9457 ProblemDetail).</li>
+ *   <li>8. Los errores no exponen informacion sensible del sistema (sin SQL, stacktraces ni nombres de paquetes).</li>
+ * </ul>
  */
 class GlobalExceptionHandlerTest {
 
