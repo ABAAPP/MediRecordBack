@@ -38,13 +38,14 @@ import com.api.medirecord.common.response.PageResponse;
 import com.api.medirecord.config.CorsConfig;
 import com.api.medirecord.config.CorsProperties;
 import com.api.medirecord.config.SecurityConfig;
+import com.api.medirecord.medicamento.dto.MedicamentoDelDiaResponse;
 import com.api.medirecord.medicamento.dto.MedicamentoRequest;
 import com.api.medirecord.medicamento.dto.MedicamentoResponse;
 import com.api.medirecord.medicamento.exception.MedicamentoAccesoDenegadoException;
 import com.api.medirecord.medicamento.exception.MedicamentoNotFoundException;
 
 /**
- * Test de slice del controller de medicamentos (B-05).
+ * Test de slice del controller de medicamentos (B-05, B-06 y B-10).
  */
 @WebMvcTest(MedicamentoController.class)
 @Import({ SecurityConfig.class, CorsConfig.class, MedicamentoControllerTest.TestCorsProperties.class })
@@ -84,6 +85,7 @@ class MedicamentoControllerTest {
 				"Paracetamol",
 				"500 mg - 1 tableta",
 				"Cada 8 horas",
+				"08:00 AM",
 				"Con alimentos",
 				LocalDate.of(2026, 10, 25),
 				LocalDate.of(2026, 11, 1),
@@ -116,6 +118,7 @@ class MedicamentoControllerTest {
 								  "nombre": "Paracetamol",
 								  "dosis": "500 mg - 1 tableta",
 								  "frecuencia": "Cada 8 horas",
+								  "horaProgramada": "08:00 AM",
 								  "instrucciones": "Con alimentos",
 								  "fechaInicio": "2026-10-25",
 								  "fechaFin": "2026-11-01"
@@ -129,6 +132,48 @@ class MedicamentoControllerTest {
 				.andExpect(jsonPath("$.data.nombre").value("Paracetamol"))
 				.andExpect(jsonPath("$.data.fechaInicio").value("2026-10-25"))
 				.andExpect(jsonPath("$.data.fechaFin").value("2026-11-01"));
+	}
+
+	@Test
+	@DisplayName("Consulta los medicamentos del dia devuelve 200 OK y estado de toma (B-10)")
+	void consultarMedicamentosDelDia() throws Exception {
+		var item = MedicamentoDelDiaResponse.de(
+				MEDICAMENTO_ID,
+				"Paracetamol",
+				"500 mg",
+				UUID.randomUUID(),
+				"08:00 AM",
+				"Cada 8 horas",
+				List.of("Lunes", "Miércoles"),
+				"Con comida",
+				LocalDate.of(2026, 10, 31),
+				true,
+				"08:05 AM",
+				USUARIO_ID);
+
+		given(service.consultarMedicamentosDelDia(any(LocalDate.class))).willReturn(List.of(item));
+
+		mockMvc.perform(get("/api/v1/medicamentos/del-dia")
+						.with(user(USUARIO_ID).roles("MEDICO"))
+						.param("fecha", "2026-10-31"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.success").value(true))
+				.andExpect(jsonPath("$.data[0].nombre").value("Paracetamol"))
+				.andExpect(jsonPath("$.data[0].realizada").value(true))
+				.andExpect(jsonPath("$.data[0].estado").value("REALIZADA"));
+	}
+
+	@Test
+	@DisplayName("GET /api/v1/medicamentos/hoy devuelve respuesta valida aunque no haya medicamentos (B-10)")
+	void consultarMedicamentosHoyVacio() throws Exception {
+		given(service.consultarMedicamentosDelDia(any(LocalDate.class))).willReturn(List.of());
+
+		mockMvc.perform(get("/api/v1/medicamentos/hoy")
+						.with(user(USUARIO_ID).roles("MEDICO")))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.success").value(true))
+				.andExpect(jsonPath("$.data").isArray())
+				.andExpect(jsonPath("$.data").isEmpty());
 	}
 
 	@Test
