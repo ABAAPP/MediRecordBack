@@ -98,7 +98,17 @@ public class GlobalExceptionHandler {
 	@ExceptionHandler(HttpMessageNotReadableException.class)
 	public ProblemDetail handleNotReadable(HttpMessageNotReadableException ex, HttpServletRequest request) {
 		log.debug("Cuerpo de peticion ilegible: {}", ex.getMessage());
-		return problem(ErrorCode.MALFORMED_REQUEST, "Revise el cuerpo de la peticion: " + ex.getMostSpecificCause().getMessage(), request);
+		String detail = "El cuerpo de la peticion no tiene un formato valido o no se pudo interpretar";
+		Throwable cause = ex.getMostSpecificCause();
+		if (cause != null && cause.getMessage() != null) {
+			String msg = cause.getMessage();
+			if (msg.contains("Cannot deserialize") || msg.contains("Failed to deserialize")) {
+				detail = "Uno de los campos en el cuerpo de la peticion no tiene el formato esperado";
+			} else if (msg.contains("JSON parse error")) {
+				detail = "El formato JSON enviado en el cuerpo de la peticion es invalido";
+			}
+		}
+		return problem(ErrorCode.MALFORMED_REQUEST, detail, request);
 	}
 
 	@ExceptionHandler(MissingServletRequestParameterException.class)
