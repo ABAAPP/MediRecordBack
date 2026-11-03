@@ -17,7 +17,7 @@ public final class PostgresTestContainerFactory {
 	public static final String PASSWORD = "medirecord";
 
 	@SuppressWarnings("resource")
-	private static final PostgreSQLContainer<?> CONTAINER = new PostgreSQLContainer<>(DockerImageName.parse(IMAGE))
+	private static final PostgreSQLContainer CONTAINER = new PostgreSQLContainer(DockerImageName.parse(IMAGE))
 			.withDatabaseName(DATABASE)
 			.withUsername(USERNAME)
 			.withPassword(PASSWORD)
@@ -30,7 +30,7 @@ public final class PostgresTestContainerFactory {
 	private PostgresTestContainerFactory() {
 	}
 
-	public static PostgreSQLContainer<?> nuevoContenedor() {
+	public static PostgreSQLContainer nuevoContenedor() {
 		return CONTAINER;
 	}
 
