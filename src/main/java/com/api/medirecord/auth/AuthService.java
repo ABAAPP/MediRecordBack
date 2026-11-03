@@ -76,6 +76,10 @@ public class AuthService {
 		}
 
 		registeredUsers.put(email, new UserRecord(request.name().trim(), email, request.password()));
+
+		// Intentar registrar usuario en Keycloak si esta disponible
+		createUserInKeycloak(request.name().trim(), email, request.password());
+
 		log.info("Usuario registrado exitosamente: {}", email);
 		return RegisterResponse.ok();
 	}
@@ -87,7 +91,13 @@ public class AuthService {
 		String identifier = request.email().trim();
 		String password = request.password();
 
-		// 1. Verificar si existe en el registro local
+		// 1. Intentar autenticar contra Keycloak en primer lugar para obtener un JWT real
+		String keycloakToken = callKeycloakTokenEndpoint(identifier, password);
+		if (keycloakToken != null) {
+			return LoginResponse.ok(keycloakToken, identifier);
+		}
+
+		// 2. Si Keycloak no esta disponible o es entorno de prueba/desarrollo, validar registro local
 		String normalizedKey = identifier.toLowerCase();
 		UserRecord localUser = registeredUsers.get(normalizedKey);
 		if (localUser != null) {
@@ -100,13 +110,73 @@ public class AuthService {
 			}
 		}
 
-		// 2. Intentar autenticar contra Keycloak si esta disponible
-		String keycloakToken = callKeycloakTokenEndpoint(identifier, password);
-		if (keycloakToken != null) {
-			return LoginResponse.ok(keycloakToken, identifier);
-		}
-
 		return LoginResponse.failure("Credenciales invalidas. Verifica tu correo y contrasena.");
+	}
+
+	private void createUserInKeycloak(String name, String email, String password) {
+		try {
+			// Obtener token de administrador de Keycloak
+			String masterTokenUrl = keycloakIssuerUri.replaceAll("/realms/.*$", "/realms/master/protocol/openid-connect/token");
+			Map<String, String> formData = Map.of(
+					"grant_type", "password",
+					"client_id", "admin-cli",
+					"username", "admin",
+					"password", "admin123");
+
+			String formBody = formData.entrySet().stream()
+					.map(e -> URLEncoder.encode(e.getKey(), StandardCharsets.UTF_8) + "="
+							+ URLEncoder.encode(e.getValue(), StandardCharsets.UTF_8))
+					.collect(Collectors.joining("&"));
+
+			HttpRequest adminAuthRequest = HttpRequest.newBuilder()
+					.uri(URI.create(masterTokenUrl))
+					.timeout(Duration.ofSeconds(3))
+					.header("Content-Type", "application/x-www-form-urlencoded")
+					.POST(HttpRequest.BodyPublishers.ofString(formBody))
+					.build();
+
+			HttpResponse<String> adminAuthResp = httpClient.send(adminAuthRequest, HttpResponse.BodyHandlers.ofString());
+			if (adminAuthResp.statusCode() != 200) {
+				return;
+			}
+
+			JsonNode adminNode = objectMapper.readTree(adminAuthResp.body());
+			String adminAccessToken = adminNode.path("access_token").asString();
+			if (adminAccessToken == null || adminAccessToken.isBlank()) {
+				return;
+			}
+
+			// Crear usuario en el realm medirecord
+			String usersUrl = keycloakIssuerUri.replaceAll("/realms/.*$", "/admin/realms/medirecord/users");
+			String userJson = """
+					{
+					  "username": "%s",
+					  "email": "%s",
+					  "enabled": true,
+					  "firstName": "%s",
+					  "credentials": [
+					    {
+					      "type": "password",
+					      "value": "%s",
+					      "temporary": false
+					    }
+					  ]
+					}
+					""".formatted(email, email, name, password);
+
+			HttpRequest createUserRequest = HttpRequest.newBuilder()
+					.uri(URI.create(usersUrl))
+					.timeout(Duration.ofSeconds(3))
+					.header("Authorization", "Bearer " + adminAccessToken)
+					.header("Content-Type", "application/json")
+					.POST(HttpRequest.BodyPublishers.ofString(userJson))
+					.build();
+
+			HttpResponse<String> createResp = httpClient.send(createUserRequest, HttpResponse.BodyHandlers.ofString());
+			log.info("Resultado de registro en Keycloak para {}: HTTP {}", email, createResp.statusCode());
+		} catch (Exception ex) {
+			log.debug("No se pudo registrar usuario en Keycloak (modo autonomo/local): {}", ex.getMessage());
+		}
 	}
 
 	private String callKeycloakTokenEndpoint(String username, String password) {
