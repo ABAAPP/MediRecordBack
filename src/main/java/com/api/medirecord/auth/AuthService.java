@@ -146,14 +146,21 @@ public class AuthService {
 				return;
 			}
 
-			// Crear usuario en el realm medirecord
+			// Crear o actualizar usuario en el realm medirecord
 			String usersUrl = keycloakIssuerUri.replaceAll("/realms/.*$", "/admin/realms/medirecord/users");
+			String[] parts = name.trim().split("\\s+", 2);
+			String firstName = parts[0];
+			String lastName = parts.length > 1 ? parts[1] : parts[0];
+
 			String userJson = """
 					{
 					  "username": "%s",
 					  "email": "%s",
 					  "enabled": true,
+					  "emailVerified": true,
+					  "requiredActions": [],
 					  "firstName": "%s",
+					  "lastName": "%s",
 					  "credentials": [
 					    {
 					      "type": "password",
@@ -162,7 +169,7 @@ public class AuthService {
 					    }
 					  ]
 					}
-					""".formatted(email, email, name, password);
+					""".formatted(email, email, firstName, lastName, password);
 
 			HttpRequest createUserRequest = HttpRequest.newBuilder()
 					.uri(URI.create(usersUrl))
@@ -174,6 +181,66 @@ public class AuthService {
 
 			HttpResponse<String> createResp = httpClient.send(createUserRequest, HttpResponse.BodyHandlers.ofString());
 			log.info("Resultado de registro en Keycloak para {}: HTTP {}", email, createResp.statusCode());
+
+			// Si el usuario ya existia en Keycloak (409), actualizar su estado y contrasena
+			if (createResp.statusCode() == 409) {
+				try {
+					String findUserUrl = usersUrl + "?username=" + URLEncoder.encode(email, StandardCharsets.UTF_8) + "&exact=true";
+					HttpRequest findReq = HttpRequest.newBuilder()
+							.uri(URI.create(findUserUrl))
+							.timeout(Duration.ofSeconds(3))
+							.header("Authorization", "Bearer " + adminAccessToken)
+							.GET()
+							.build();
+					HttpResponse<String> findResp = httpClient.send(findReq, HttpResponse.BodyHandlers.ofString());
+					if (findResp.statusCode() == 200) {
+						JsonNode usersList = objectMapper.readTree(findResp.body());
+						if (usersList.isArray() && !usersList.isEmpty()) {
+							String userId = usersList.get(0).path("id").asText();
+							if (userId != null && !userId.isBlank()) {
+								// 1. Asegurar emailVerified y limpiar requiredActions
+								String updateJson = """
+										{
+										  "firstName": "%s",
+										  "lastName": "%s",
+										  "emailVerified": true,
+										  "requiredActions": [],
+										  "enabled": true
+										}
+										""".formatted(firstName, lastName);
+								HttpRequest updateReq = HttpRequest.newBuilder()
+										.uri(URI.create(usersUrl + "/" + userId))
+										.timeout(Duration.ofSeconds(3))
+										.header("Authorization", "Bearer " + adminAccessToken)
+										.header("Content-Type", "application/json")
+										.PUT(HttpRequest.BodyPublishers.ofString(updateJson))
+										.build();
+								httpClient.send(updateReq, HttpResponse.BodyHandlers.ofString());
+
+								// 2. Actualizar contrasena
+								String resetPassJson = """
+										{
+										  "type": "password",
+										  "value": "%s",
+										  "temporary": false
+										}
+										""".formatted(password);
+								HttpRequest resetPassReq = HttpRequest.newBuilder()
+										.uri(URI.create(usersUrl + "/" + userId + "/reset-password"))
+										.timeout(Duration.ofSeconds(3))
+										.header("Authorization", "Bearer " + adminAccessToken)
+										.header("Content-Type", "application/json")
+										.PUT(HttpRequest.BodyPublishers.ofString(resetPassJson))
+										.build();
+								httpClient.send(resetPassReq, HttpResponse.BodyHandlers.ofString());
+								log.info("Usuario existente en Keycloak actualizado exitosamente: {}", email);
+							}
+						}
+					}
+				} catch (Exception ex) {
+					log.warn("No se pudo actualizar usuario existente en Keycloak: {}", ex.getMessage());
+				}
+			}
 		} catch (Exception ex) {
 			log.debug("No se pudo registrar usuario en Keycloak (modo autonomo/local): {}", ex.getMessage());
 		}
